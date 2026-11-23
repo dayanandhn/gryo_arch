@@ -1,0 +1,1435 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>GyroArchery — Precision Tilt Bow Simulator</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
+    <style>
+        /* Custom styles for crisp canvas rendering, animations, and touch ergonomics */
+        * {
+            -webkit-tap-highlight-color: transparent;
+            user-select: none;
+            -webkit-user-select: none;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #0f172a;
+            color: #f8fafc;
+            overflow: hidden;
+            touch-action: none;
+        }
+
+        .mono {
+            font-family: 'JetBrains Mono', monospace;
+        }
+
+        /* Custom Range Sliders */
+        input[type="range"] {
+            -webkit-appearance: none;
+            appearance: none;
+            background: transparent;
+            cursor: pointer;
+        }
+
+        input[type="range"]::-webkit-slider-runnable-track {
+            height: 8px;
+            border-radius: 999px;
+            background: #334155;
+        }
+
+        input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            appearance: none;
+            margin-top: -6px;
+            background-color: #facc15;
+            height: 20px;
+            width: 20px;
+            border-radius: 50%;
+            border: 2px solid #0f172a;
+            box-shadow: 0 2px 6px rgba(0, 0, 0, 0.4);
+            transition: transform 0.1s ease;
+        }
+
+        input[type="range"]:active::-webkit-slider-thumb {
+            transform: scale(1.2);
+            background-color: #fef08a;
+        }
+
+        /* Draw button pulse & tactile feel */
+        .draw-btn {
+            background: linear-gradient(145deg, #f59e0b, #d97706);
+            box-shadow: 0 8px 20px -4px rgba(245, 158, 11, 0.5), inset 0 2px 1px rgba(255, 255, 255, 0.3);
+            transition: transform 0.08s ease, box-shadow 0.08s ease, background 0.15s ease;
+        }
+
+        .draw-btn:active, .draw-btn.drawing {
+            transform: scale(0.95);
+            background: linear-gradient(145deg, #ef4444, #b91c1c);
+            box-shadow: 0 4px 12px -2px rgba(239, 68, 68, 0.6), inset 0 2px 4px rgba(0, 0, 0, 0.3);
+        }
+
+        .draw-btn:disabled {
+            background: #334155;
+            box-shadow: none;
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+
+        /* Pop-up score callout animation */
+        @keyframes scoreFloat {
+            0% {
+                opacity: 0;
+                transform: translate(-50%, 10px) scale(0.8);
+            }
+            20% {
+                opacity: 1;
+                transform: translate(-50%, -10px) scale(1.1);
+            }
+            80% {
+                opacity: 1;
+                transform: translate(-50%, -35px) scale(1);
+            }
+            100% {
+                opacity: 0;
+                transform: translate(-50%, -50px) scale(0.95);
+            }
+        }
+
+        .score-callout {
+            animation: scoreFloat 1.5s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+            pointer-events: none;
+        }
+
+        /* Subtle background field grid */
+        .range-bg {
+            background: radial-gradient(circle at 50% 45%, #1e293b 0%, #0f172a 75%, #020617 100%);
+        }
+    </style>
+</head>
+<body class="h-[100dvh] w-screen flex flex-col justify-between range-bg relative">
+
+    <!-- Top Score & Status Bar -->
+    <header class="w-full px-3 pt-3 pb-2 z-20 flex flex-col gap-2 max-w-2xl mx-auto">
+        <div class="flex items-center justify-between bg-slate-900/90 backdrop-blur-md border border-slate-700/80 rounded-2xl px-3.5 py-2.5 shadow-lg">
+            <!-- Score Metric -->
+            <div class="flex flex-col">
+                <span class="text-[10px] font-bold uppercase tracking-wider text-slate-400">Score</span>
+                <div class="flex items-baseline gap-1">
+                    <span id="currentScore" class="text-2xl font-extrabold text-yellow-400 mono leading-none">0</span>
+                    <span class="text-xs text-slate-500 font-semibold">/ 60</span>
+                </div>
+            </div>
+
+            <!-- Arrows Quiver Visual -->
+            <div class="flex flex-col items-center">
+                <span class="text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1">Quiver (<span id="arrowsLeftText">6</span>)</span>
+                <div id="quiverIcons" class="flex items-center gap-1.5">
+                    <!-- Populated via JS -->
+                </div>
+            </div>
+
+            <!-- Best Score & Mode Badge -->
+            <div class="flex items-center gap-2.5">
+                <div class="flex flex-col items-end">
+                    <span class="text-[10px] font-bold uppercase tracking-wider text-slate-400">Best</span>
+                    <span id="highScore" class="text-lg font-bold text-emerald-400 mono leading-none">0</span>
+                </div>
+                <button id="toggleSettingsBtn" title="Tuning & Controls" class="p-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 active:bg-slate-600 border border-slate-600 text-slate-200 transition">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <line x1="4" y1="21" x2="4" y2="14"></line><line x1="4" y1="10" x2="4" y2="3"></line>
+                        <line x1="12" y1="21" x2="12" y2="12"></line><line x1="12" y1="8" x2="12" y2="3"></line>
+                        <line x1="20" y1="21" x2="20" y2="16"></line><line x1="20" y1="12" x2="20" y2="3"></line>
+                        <line x1="1" y1="14" x2="7" y2="14"></line><line x1="9" y1="8" x2="15" y2="8"></line>
+                        <line x1="17" y1="16" x2="23" y2="16"></line>
+                    </svg>
+                </button>
+            </div>
+        </div>
+
+        <!-- Compact Status Pill -->
+        <div class="flex items-center justify-between px-1 text-xs">
+            <div id="modeBadge" class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-slate-800/90 border border-slate-700 text-slate-300 font-medium">
+                <span id="modeDot" class="w-2 h-2 rounded-full bg-amber-400 animate-pulse"></span>
+                <span id="modeLabel">Desktop / Touch Aim Mode</span>
+            </div>
+
+            <div class="flex items-center gap-2">
+                <button id="calibrateBtn" class="px-3 py-1 rounded-full bg-sky-500/20 hover:bg-sky-500/30 active:bg-sky-500/40 border border-sky-400/50 text-sky-300 font-semibold transition flex items-center gap-1">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                        <circle cx="12" cy="12" r="3"></circle>
+                        <path d="M12 2v4m0 12v4M2 12h4m12 0h4"></path>
+                    </svg>
+                    Zero Tilt
+                </button>
+                <button id="resetBtn" class="px-3 py-1 rounded-full bg-slate-800 hover:bg-slate-700 active:bg-slate-600 border border-slate-600 text-slate-300 font-semibold transition">
+                    Reset
+                </button>
+            </div>
+        </div>
+    </header>
+
+    <!-- Collapsible Sensitivity & Stability Tuning Drawer -->
+    <div id="settingsDrawer" class="hidden absolute top-[106px] left-1/2 -translate-x-1/2 w-[92%] max-w-md z-30 bg-slate-900/95 backdrop-blur-xl border border-slate-700 rounded-2xl p-4 shadow-2xl">
+        <div class="flex items-center justify-between mb-3 pb-2 border-b border-slate-800">
+            <h3 class="text-sm font-bold uppercase tracking-wider text-slate-200">Bow & Gyro Tuning</h3>
+            <button id="closeSettingsBtn" class="text-xs font-semibold text-slate-400 hover:text-white px-2 py-1 rounded-lg bg-slate-800">Done</button>
+        </div>
+
+        <div class="space-y-4">
+            <!-- Tilt Sensitivity Slider -->
+            <div>
+                <div class="flex justify-between items-center mb-1">
+                    <label for="sensitivitySlider" class="text-xs font-semibold text-slate-300">Tilt Sensitivity</label>
+                    <span id="sensitivityValue" class="text-xs font-bold text-yellow-400 mono bg-slate-800 px-2 py-0.5 rounded">1.4x</span>
+                </div>
+                <input id="sensitivitySlider" type="range" min="0.5" max="3.0" step="0.1" value="1.4" class="w-full">
+                <div class="flex justify-between text-[10px] text-slate-500 mt-1">
+                    <span>0.5x (Fine)</span>
+                    <span>1.5x (Balanced)</span>
+                    <span>3.0x (Quick)</span>
+                </div>
+            </div>
+
+            <!-- Smoothing / Stability Slider -->
+            <div>
+                <div class="flex justify-between items-center mb-1">
+                    <label for="smoothingSlider" class="text-xs font-semibold text-slate-300">Stabilizer Damping</label>
+                    <span id="smoothingValue" class="text-xs font-bold text-sky-400 mono bg-slate-800 px-2 py-0.5 rounded">65%</span>
+                </div>
+                <input id="smoothingSlider" type="range" min="10" max="90" step="5" value="65" class="w-full">
+                <div class="flex justify-between text-[10px] text-slate-500 mt-1">
+                    <span>Raw / Fast</span>
+                    <span>Steady Hand</span>
+                </div>
+            </div>
+
+            <!-- Realistic Ballistics (Gravity & Wind) Toggle -->
+            <div class="pt-2 border-t border-slate-800 flex items-center justify-between gap-3">
+                <div class="flex flex-col">
+                    <span class="text-xs font-semibold text-slate-200">Realistic Ballistics (Gravity & Wind)</span>
+                    <span class="text-[10px] text-slate-400">Off = pinpoint reticle accuracy</span>
+                </div>
+                <label class="relative inline-flex items-center cursor-pointer shrink-0">
+                    <input id="realisticBallisticsToggle" type="checkbox" class="sr-only peer">
+                    <div class="w-11 h-6 bg-slate-700 rounded-full peer peer-checked:bg-amber-500 after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:after:translate-x-5"></div>
+                </label>
+            </div>
+
+            <!-- Sound Toggle & Gyro Re-request -->
+            <div class="pt-2 border-t border-slate-800 flex items-center justify-between gap-2">
+                <button id="soundToggleBtn" class="flex-1 py-2 px-3 rounded-xl bg-slate-800 border border-slate-700 text-xs font-semibold text-slate-200 flex items-center justify-center gap-1.5">
+                    <span id="soundIcon">🔊</span>
+                    <span id="soundLabel">Sound: ON</span>
+                </button>
+                <button id="reEnableGyroBtn" class="flex-1 py-2 px-3 rounded-xl bg-amber-500/20 border border-amber-500/40 text-xs font-semibold text-amber-300">
+                    Enable Gyro Sensor
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Main Target Canvas Container -->
+    <main id="arenaContainer" class="relative flex-1 w-full flex items-center justify-center overflow-hidden">
+        <canvas id="archeryCanvas" class="w-full h-full block cursor-crosshair"></canvas>
+
+        <!-- Dynamic Hit Callout Layer -->
+        <div id="calloutLayer" class="absolute inset-0 pointer-events-none overflow-hidden"></div>
+
+        <!-- Subtle Helper Hint for Desktop / Tilt -->
+        <div id="aimHint" class="absolute bottom-2 left-1/2 -translate-x-1/2 pointer-events-none text-center px-3 py-1 rounded-full bg-slate-950/60 border border-slate-800/80 text-[11px] text-slate-400 whitespace-nowrap">
+            Tilt phone to aim • Drag on screen if on desktop
+        </div>
+    </main>
+
+    <!-- Bottom Controls: Sensitivity Quick-Bar & Draw Trigger -->
+    <footer class="w-full px-4 pb-4 pt-2 z-20 max-w-2xl mx-auto flex flex-col gap-2.5">
+        <!-- Quick Sensitivity Adjuster Bar -->
+        <div class="bg-slate-900/90 backdrop-blur-md border border-slate-800 rounded-2xl px-3.5 py-2 flex items-center gap-3">
+            <span class="text-[11px] font-bold uppercase tracking-wider text-slate-400 shrink-0">Tilt Sens</span>
+            <input id="quickSensitivitySlider" type="range" min="0.5" max="3.0" step="0.1" value="1.4" class="w-full">
+            <span id="quickSensitivityVal" class="text-xs font-bold text-yellow-400 mono w-10 text-right shrink-0">1.4x</span>
+        </div>
+
+        <!-- Primary Action Button: Hold to Draw & Release to Shoot -->
+        <button id="drawShootBtn" class="draw-btn w-full py-4 rounded-2xl font-extrabold text-base sm:text-lg tracking-wide uppercase text-slate-950 flex items-center justify-center gap-2.5 select-none">
+            <svg xmlns="http://www.w3.org/2000/svg" class="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="12" cy="12" r="10"></circle>
+                <circle cx="12" cy="12" r="6"></circle>
+                <circle cx="12" cy="12" r="2"></circle>
+            </svg>
+            <span id="drawBtnText">Hold to Draw & Release to Shoot</span>
+        </button>
+    </footer>
+
+    <!-- Initial Onboarding & Gyroscope Permission Modal -->
+    <div id="startModal" class="fixed inset-0 z-50 bg-slate-950/90 backdrop-blur-md flex items-center justify-center p-4">
+        <div class="bg-slate-900 border border-slate-700 rounded-3xl max-w-md w-full p-6 shadow-2xl text-center space-y-5">
+            <!-- Target Icon Emblem -->
+            <div class="w-20 h-20 mx-auto rounded-full bg-slate-800 border-4 border-sky-500 flex items-center justify-center shadow-lg relative">
+                <div class="w-12 h-12 rounded-full bg-red-500 flex items-center justify-center">
+                    <div class="w-6 h-6 rounded-full bg-yellow-400 border-2 border-slate-900"></div>
+                </div>
+            </div>
+
+            <div class="space-y-2">
+                <h1 class="text-2xl font-extrabold tracking-tight text-white">Gyroscope Archery</h1>
+                <p class="text-sm text-slate-300 leading-relaxed">
+                    Tilt your phone naturally like a bow sight to aim at the bullseye. Hold the shoot button to draw your bowstring, steady your aim, and release to fire!
+                </p>
+            </div>
+
+            <div class="bg-slate-800/80 border border-slate-700/80 rounded-2xl p-3.5 text-left space-y-2 text-xs text-slate-300">
+                <div class="flex items-start gap-2">
+                    <span class="text-yellow-400 font-bold">1.</span>
+                    <span>Tap <strong>Start & Enable Gyroscope</strong> below (required on iOS Safari & mobile browsers).</span>
+                </div>
+                <div class="flex items-start gap-2">
+                    <span class="text-sky-400 font-bold">2.</span>
+                    <span>Hold your phone comfortably and tap <strong>Zero Tilt</strong> anytime to center your aim.</span>
+                </div>
+                <div class="flex items-start gap-2">
+                    <span class="text-emerald-400 font-bold">3.</span>
+                    <span>On desktop without gyro? Drag directly on the target screen to aim!</span>
+                </div>
+            </div>
+
+            <div class="space-y-2.5 pt-1">
+                <button id="enableGyroStartBtn" class="w-full py-3.5 px-5 rounded-2xl bg-yellow-400 hover:bg-yellow-300 active:scale-[0.98] text-slate-950 font-extrabold text-base shadow-lg shadow-yellow-400/20 transition">
+                    Start & Enable Gyroscope
+                </button>
+                <button id="desktopFallbackBtn" class="w-full py-2.5 px-4 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold text-xs transition">
+                    Continue in Touch / Mouse Mode
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Round Complete Summary Modal -->
+    <div id="roundOverModal" class="hidden fixed inset-0 z-40 bg-slate-950/85 backdrop-blur-md flex items-center justify-center p-4">
+        <div class="bg-slate-900 border border-slate-700 rounded-3xl max-w-sm w-full p-6 shadow-2xl text-center space-y-5">
+            <div class="space-y-1">
+                <span class="text-xs font-bold uppercase tracking-widest text-yellow-400">End of Round</span>
+                <h2 class="text-3xl font-extrabold text-white">Quiver Empty!</h2>
+            </div>
+
+            <div class="grid grid-cols-2 gap-3 bg-slate-800/80 p-4 rounded-2xl border border-slate-700">
+                <div class="flex flex-col">
+                    <span class="text-xs text-slate-400 font-medium">Final Score</span>
+                    <span id="finalScoreDisplay" class="text-3xl font-extrabold text-yellow-400 mono">0</span>
+                </div>
+                <div class="flex flex-col border-l border-slate-700">
+                    <span class="text-xs text-slate-400 font-medium">Best Round</span>
+                    <span id="finalBestDisplay" class="text-3xl font-extrabold text-emerald-400 mono">0</span>
+                </div>
+            </div>
+
+            <p id="roundSummaryRank" class="text-sm font-medium text-slate-300">Sharp Eye! Keep practicing your steady release.</p>
+
+            <button id="playAgainBtn" class="w-full py-3.5 rounded-2xl bg-emerald-500 hover:bg-emerald-400 active:scale-[0.98] text-slate-950 font-extrabold text-base shadow-lg shadow-emerald-500/25 transition">
+                Shoot Another Round
+            </button>
+        </div>
+    </div>
+
+    <script>
+        /**
+         * Gyroscope Archery Web Application
+         * Implements DeviceOrientation API with iOS 13+ permission handling,
+         * desktop/touch drag fallback, exponential smoothing, draw power mechanics,
+         * arrow flight physics/animation, and Web Audio API procedural sound synthesis.
+         */
+
+        // ==========================================
+        // 1. WEB AUDIO API SOUND SYNTHESIZER
+        // ==========================================
+        class SoundEngine {
+            constructor() {
+                this.ctx = null;
+                this.enabled = true;
+            }
+
+            init() {
+                if (!this.ctx) {
+                    const AudioContext = window.AudioContext || window.webkitAudioContext;
+                    if (AudioContext) {
+                        this.ctx = new AudioContext();
+                    }
+                }
+                if (this.ctx && this.ctx.state === 'suspended') {
+                    this.ctx.resume();
+                }
+            }
+
+            // Subtle bowstring creak/tension sound while drawing
+            playDrawTick(power) {
+                if (!this.enabled) return;
+                this.init();
+                if (!this.ctx) return;
+
+                const now = this.ctx.currentTime;
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+
+                osc.type = 'triangle';
+                osc.frequency.setValueAtTime(110 + power * 90, now);
+                osc.frequency.exponentialRampToValueAtTime(140 + power * 110, now + 0.04);
+
+                gain.gain.setValueAtTime(0.03, now);
+                gain.gain.exponentialRampToValueAtTime(0.001, now + 0.045);
+
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+
+                osc.start(now);
+                osc.stop(now + 0.05);
+            }
+
+            // Bowstring twang & air whoosh on release
+            playRelease(power) {
+                if (!this.enabled) return;
+                this.init();
+                if (!this.ctx) return;
+
+                const now = this.ctx.currentTime;
+
+                // 1. Bowstring Twang (low damped sine/triangle)
+                const stringOsc = this.ctx.createOscillator();
+                const stringGain = this.ctx.createGain();
+                stringOsc.type = 'sawtooth';
+                const baseFreq = 95 + power * 45;
+                stringOsc.frequency.setValueAtTime(baseFreq, now);
+                stringOsc.frequency.exponentialRampToValueAtTime(48, now + 0.28);
+
+                const filter = this.ctx.createBiquadFilter();
+                filter.type = 'lowpass';
+                filter.frequency.setValueAtTime(600 + power * 500, now);
+                filter.frequency.exponentialRampToValueAtTime(120, now + 0.28);
+
+                stringGain.gain.setValueAtTime(0.28, now);
+                stringGain.gain.exponentialRampToValueAtTime(0.001, now + 0.3);
+
+                stringOsc.connect(filter);
+                filter.connect(stringGain);
+                stringGain.connect(this.ctx.destination);
+
+                stringOsc.start(now);
+                stringOsc.stop(now + 0.31);
+
+                // 2. Arrow Air Whoosh (filtered white noise)
+                const bufferSize = this.ctx.sampleRate * 0.25;
+                const buffer = this.ctx.createBuffer(1, bufferSize, this.ctx.sampleRate);
+                const data = buffer.getChannelData(0);
+                for (let i = 0; i < bufferSize; i++) {
+                    data[i] = Math.random() * 2 - 1;
+                }
+
+                const noise = this.ctx.createBufferSource();
+                noise.buffer = buffer;
+
+                const noiseFilter = this.ctx.createBiquadFilter();
+                noiseFilter.type = 'bandpass';
+                noiseFilter.frequency.setValueAtTime(800, now);
+                noiseFilter.frequency.exponentialRampToValueAtTime(2200, now + 0.22);
+                noiseFilter.Q.value = 1.8;
+
+                const noiseGain = this.ctx.createGain();
+                noiseGain.gain.setValueAtTime(0.15 * Math.max(0.4, power), now);
+                noiseGain.gain.exponentialRampToValueAtTime(0.001, now + 0.24);
+
+                noise.connect(noiseFilter);
+                noiseFilter.connect(noiseGain);
+                noiseGain.connect(this.ctx.destination);
+
+                noise.start(now);
+            }
+
+            // Crisp target thud + celebratory chime on bullseye
+            playImpact(score) {
+                if (!this.enabled) return;
+                this.init();
+                if (!this.ctx) return;
+
+                const now = this.ctx.currentTime;
+
+                // Target foam/wood thud
+                const thudOsc = this.ctx.createOscillator();
+                const thudGain = this.ctx.createGain();
+                thudOsc.type = 'sine';
+                thudOsc.frequency.setValueAtTime(score > 0 ? 150 : 85, now);
+                thudOsc.frequency.exponentialRampToValueAtTime(35, now + 0.14);
+
+                thudGain.gain.setValueAtTime(0.45, now);
+                thudGain.gain.exponentialRampToValueAtTime(0.001, now + 0.15);
+
+                thudOsc.connect(thudGain);
+                thudGain.connect(this.ctx.destination);
+
+                thudOsc.start(now);
+                thudOsc.stop(now + 0.16);
+
+                // Ring bell chime for high-value hits (9 or 10)
+                if (score >= 9) {
+                    const chimeOsc = this.ctx.createOscillator();
+                    const chimeGain = this.ctx.createGain();
+                    chimeOsc.type = 'sine';
+                    chimeOsc.frequency.setValueAtTime(score === 10 ? 1046.5 : 880, now + 0.03); // C6 or A5
+                    if (score === 10) {
+                        chimeOsc.frequency.setValueAtTime(1318.5, now + 0.11); // E6 harmonic sparkle
+                    }
+
+                    chimeGain.gain.setValueAtTime(0.16, now + 0.03);
+                    chimeGain.gain.exponentialRampToValueAtTime(0.001, now + 0.45);
+
+                    chimeOsc.connect(chimeGain);
+                    chimeGain.connect(this.ctx.destination);
+
+                    chimeOsc.start(now + 0.03);
+                    chimeOsc.stop(now + 0.46);
+                }
+            }
+        }
+
+        const sound = new SoundEngine();
+
+        // ==========================================
+        // 2. GAME STATE & CONFIGURATION
+        // ==========================================
+        const MAX_ARROWS = 6;
+
+        const state = {
+            // Scoring & round state
+            score: 0,
+            highScore: parseInt(localStorage.getItem('gyroArcheryHighScore') || '0', 10),
+            arrowsLeft: MAX_ARROWS,
+            roundActive: true,
+
+            // Gyroscope & Orientation state
+            gyroActive: false,
+            rawBeta: 45,       // Current raw front-back tilt
+            rawGamma: 0,       // Current raw left-right tilt
+            zeroBeta: 45,      // Calibrated neutral front-back tilt
+            zeroGamma: 0,      // Calibrated neutral left-right tilt
+            hasInitialReading: false,
+
+            // Tuning settings
+            sensitivity: 1.4,  // 0.5x to 3.0x multiplier
+            smoothing: 0.65,   // 0.10 to 0.90 damping factor
+            realisticBallistics: false, // Default OFF: pinpoint reticle accuracy
+
+            // Aiming coordinates (normalized relative to target radius: 0,0 is center)
+            targetNormX: 0,    // Desired aim X in normalized target units
+            targetNormY: 0,    // Desired aim Y in normalized target units
+            currentNormX: 0,   // Smoothed reticle X
+            currentNormY: 0,   // Smoothed reticle Y
+            renderAimX: 0,     // Exact rendered reticle X (including sway)
+            renderAimY: 0,     // Exact rendered reticle Y (including sway)
+            lastPointerX: 0,
+            lastPointerY: 0,
+
+            // Draw & Shoot state
+            isDrawing: false,
+            drawStartTime: 0,
+            drawPower: 0,      // 0.0 to 1.0
+            lastTickStep: 0,
+
+            // In-flight arrow animation
+            flyingArrow: null, // { startX, startY, targetX, targetY, progress, power, dropOffset }
+
+            // Stuck arrows on target (normalized coordinates so they scale cleanly on resize)
+            stuckArrows: [],   // Array of { normX, normY, score, angle }
+
+            // Canvas layout metrics
+            width: 0,
+            height: 0,
+            centerX: 0,
+            centerY: 0,
+            targetRadius: 150
+        };
+
+        // Standard World Archery 10-Ring Target Definitions (from outer 1 to inner 10)
+        // Each ring occupies 10% of the total target radius
+        const RINGS = [
+            { score: 1,  maxR: 1.00, color: '#f8fafc', stroke: '#94a3b8', labelColor: '#0f172a' }, // Outer White
+            { score: 2,  maxR: 0.90, color: '#f1f5f9', stroke: '#64748b', labelColor: '#0f172a' }, // Inner White
+            { score: 3,  maxR: 0.80, color: '#1e293b', stroke: '#475569', labelColor: '#f8fafc' }, // Outer Black
+            { score: 4,  maxR: 0.70, color: '#0f172a', stroke: '#334155', labelColor: '#f8fafc' }, // Inner Black
+            { score: 5,  maxR: 0.60, color: '#0284c7', stroke: '#0369a1', labelColor: '#ffffff' }, // Outer Blue
+            { score: 6,  maxR: 0.50, color: '#0ea5e9', stroke: '#0284c7', labelColor: '#ffffff' }, // Inner Blue
+            { score: 7,  maxR: 0.40, color: '#dc2626', stroke: '#991b1b', labelColor: '#ffffff' }, // Outer Red
+            { score: 8,  maxR: 0.30, color: '#ef4444', stroke: '#b91c1c', labelColor: '#ffffff' }, // Inner Red
+            { score: 9,  maxR: 0.20, color: '#eab308', stroke: '#a16207', labelColor: '#0f172a' }, // Outer Gold
+            { score: 10, maxR: 0.10, color: '#facc15', stroke: '#854d0e', labelColor: '#0f172a' }, // Bullseye Gold
+            { score: 10, maxR: 0.045, color: '#fde047', stroke: '#a16207', labelColor: '#0f172a', isX: true } // Inner X-ring
+        ];
+
+        // ==========================================
+        // 3. DOM REFERENCES
+        // ==========================================
+        const canvas = document.getElementById('archeryCanvas');
+        const ctx = canvas.getContext('2d');
+        const arenaContainer = document.getElementById('arenaContainer');
+        const calloutLayer = document.getElementById('calloutLayer');
+
+        const currentScoreEl = document.getElementById('currentScore');
+        const highScoreEl = document.getElementById('highScore');
+        const arrowsLeftText = document.getElementById('arrowsLeftText');
+        const quiverIcons = document.getElementById('quiverIcons');
+
+        const modeDot = document.getElementById('modeDot');
+        const modeLabel = document.getElementById('modeLabel');
+        const aimHint = document.getElementById('aimHint');
+
+        const drawShootBtn = document.getElementById('drawShootBtn');
+        const drawBtnText = document.getElementById('drawBtnText');
+
+        const calibrateBtn = document.getElementById('calibrateBtn');
+        const resetBtn = document.getElementById('resetBtn');
+
+        // Modals & Drawers
+        const startModal = document.getElementById('startModal');
+        const enableGyroStartBtn = document.getElementById('enableGyroStartBtn');
+        const desktopFallbackBtn = document.getElementById('desktopFallbackBtn');
+
+        const roundOverModal = document.getElementById('roundOverModal');
+        const finalScoreDisplay = document.getElementById('finalScoreDisplay');
+        const finalBestDisplay = document.getElementById('finalBestDisplay');
+        const roundSummaryRank = document.getElementById('roundSummaryRank');
+        const playAgainBtn = document.getElementById('playAgainBtn');
+
+        const toggleSettingsBtn = document.getElementById('toggleSettingsBtn');
+        const settingsDrawer = document.getElementById('settingsDrawer');
+        const closeSettingsBtn = document.getElementById('closeSettingsBtn');
+        const sensitivitySlider = document.getElementById('sensitivitySlider');
+        const sensitivityValue = document.getElementById('sensitivityValue');
+        const quickSensitivitySlider = document.getElementById('quickSensitivitySlider');
+        const quickSensitivityVal = document.getElementById('quickSensitivityVal');
+        const smoothingSlider = document.getElementById('smoothingSlider');
+        const smoothingValue = document.getElementById('smoothingValue');
+        const realisticBallisticsToggle = document.getElementById('realisticBallisticsToggle');
+        const soundToggleBtn = document.getElementById('soundToggleBtn');
+        const soundIcon = document.getElementById('soundIcon');
+        const soundLabel = document.getElementById('soundLabel');
+        const reEnableGyroBtn = document.getElementById('reEnableGyroBtn');
+
+        // ==========================================
+        // 4. RESPONSIVE CANVAS SIZING
+        // ==========================================
+        function resizeCanvas() {
+            const rect = arenaContainer.getBoundingClientRect();
+            const dpr = Math.min(window.devicePixelRatio || 1, 2);
+
+            state.width = rect.width;
+            state.height = rect.height;
+
+            canvas.width = state.width * dpr;
+            canvas.height = state.height * dpr;
+            ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+            state.centerX = state.width / 2;
+            state.centerY = state.height / 2;
+
+            // Target fits comfortably inside the smallest viewport dimension with breathing room
+            const minDim = Math.min(state.width, state.height);
+            state.targetRadius = Math.max(115, Math.min(240, minDim * 0.41));
+        }
+
+        window.addEventListener('resize', resizeCanvas);
+
+        // ==========================================
+        // 5. GYROSCOPE & ORIENTATION HANDLING
+        // ==========================================
+        function handleDeviceOrientation(event) {
+            if (event.beta === null || event.gamma === null) return;
+
+            state.rawBeta = event.beta;   // Front-to-back tilt (-180 to 180)
+            state.rawGamma = event.gamma; // Left-to-right tilt (-90 to 90)
+
+            // Automatically calibrate on very first valid sensor reading
+            if (!state.hasInitialReading) {
+                state.zeroBeta = event.beta;
+                state.zeroGamma = event.gamma;
+                state.hasInitialReading = true;
+            }
+
+            if (!state.gyroActive) {
+                state.gyroActive = true;
+                updateModeIndicator();
+            }
+        }
+
+        async function requestGyroscopePermission() {
+            sound.init();
+            try {
+                if (typeof DeviceOrientationEvent !== 'undefined' &&
+                    typeof DeviceOrientationEvent.requestPermission === 'function') {
+                    // iOS 13+ explicit permission flow
+                    const permissionState = await DeviceOrientationEvent.requestPermission();
+                    if (permissionState === 'granted') {
+                        window.addEventListener('deviceorientation', handleDeviceOrientation);
+                        state.gyroActive = true;
+                        state.hasInitialReading = false; // Re-zero on next reading
+                        updateModeIndicator();
+                        showToast('Gyroscope Enabled! Tilt to aim.');
+                    } else {
+                        showToast('Gyro permission denied. Using Touch/Mouse mode.');
+                    }
+                } else if ('DeviceOrientationEvent' in window) {
+                    // Android / Chrome / Standard browsers
+                    window.addEventListener('deviceorientation', handleDeviceOrientation);
+                    state.hasInitialReading = false;
+                    // Check after short delay if sensor events actually fired (desktop browsers often support the API without hardware)
+                    setTimeout(() => {
+                        if (!state.hasInitialReading) {
+                            showToast('No tilt sensor detected — use Touch/Mouse drag.');
+                        } else {
+                            showToast('Gyroscope Active! Tap Zero Tilt anytime.');
+                        }
+                    }, 600);
+                } else {
+                    showToast('DeviceOrientation not supported. Using Touch/Mouse mode.');
+                }
+            } catch (err) {
+                console.warn('Gyroscope initialization notice:', err);
+                showToast('Using Touch/Mouse fallback mode.');
+            }
+        }
+
+        function calibrateZeroTilt() {
+            state.zeroBeta = state.rawBeta;
+            state.zeroGamma = state.rawGamma;
+            state.targetNormX = 0;
+            state.targetNormY = 0;
+            state.currentNormX = 0;
+            state.currentNormY = 0;
+            showToast('Aim Calibrated to Current Angle');
+        }
+
+        function updateModeIndicator() {
+            if (state.gyroActive && state.hasInitialReading) {
+                modeDot.className = 'w-2 h-2 rounded-full bg-emerald-400';
+                modeLabel.textContent = 'Gyroscope Tilt Active';
+                aimHint.textContent = 'Tilt phone to aim • Tap "Zero Tilt" to center';
+            } else {
+                modeDot.className = 'w-2 h-2 rounded-full bg-amber-400';
+                modeLabel.textContent = 'Touch / Mouse Aim Mode';
+                aimHint.textContent = 'Drag anywhere on target to aim • Hold button to shoot';
+            }
+        }
+
+        // ==========================================
+        // 6. DESKTOP & TOUCH DRAG AIM FALLBACK
+        // ==========================================
+        canvas.addEventListener('pointerdown', (e) => {
+            if (e.button !== 0 && e.pointerType === 'mouse') return;
+            state.isDraggingAim = true;
+            state.lastPointerX = e.clientX;
+            state.lastPointerY = e.clientY;
+            canvas.setPointerCapture(e.pointerId);
+        });
+
+        canvas.addEventListener('pointermove', (e) => {
+            if (!state.isDraggingAim) return;
+            const dx = e.clientX - state.lastPointerX;
+            const dy = e.clientY - state.lastPointerY;
+            state.lastPointerX = e.clientX;
+            state.lastPointerY = e.clientY;
+
+            // Convert pixel drag to normalized target coordinates scaled by sensitivity
+            const moveScale = (1 / state.targetRadius) * state.sensitivity;
+            state.targetNormX = clamp(state.targetNormX + dx * moveScale, -1.65, 1.65);
+            state.targetNormY = clamp(state.targetNormY + dy * moveScale, -1.65, 1.65);
+        });
+
+        canvas.addEventListener('pointerup', (e) => {
+            state.isDraggingAim = false;
+            if (canvas.hasPointerCapture(e.pointerId)) {
+                canvas.releasePointerCapture(e.pointerId);
+            }
+        });
+
+        // ==========================================
+        // 7. DRAW & RELEASE MECHANIC
+        // ==========================================
+        function startDrawing(e) {
+            if (e) e.preventDefault();
+            if (!state.roundActive || state.arrowsLeft <= 0 || state.flyingArrow) return;
+
+            sound.init();
+            state.isDrawing = true;
+            state.drawStartTime = performance.now();
+            state.drawPower = 0;
+            state.lastTickStep = 0;
+
+            drawShootBtn.classList.add('drawing');
+            drawBtnText.textContent = 'Drawing Bow... Release to Fire!';
+        }
+
+        function releaseArrow(e) {
+            if (e) e.preventDefault();
+            if (!state.isDrawing) return;
+
+            state.isDrawing = false;
+            drawShootBtn.classList.remove('drawing');
+            drawBtnText.textContent = 'Hold to Draw & Release to Shoot';
+
+            // Require at least a tiny tap (minimum 0.18 power so accidental brushes still launch reasonably)
+            const finalPower = Math.max(0.22, state.drawPower);
+            fireArrow(finalPower);
+            state.drawPower = 0;
+        }
+
+        drawShootBtn.addEventListener('pointerdown', startDrawing);
+        window.addEventListener('pointerup', releaseArrow);
+        window.addEventListener('pointercancel', releaseArrow);
+
+        function fireArrow(power) {
+            if (state.arrowsLeft <= 0 || state.flyingArrow) return;
+
+            state.arrowsLeft--;
+            updateHUD();
+
+            sound.playRelease(power);
+
+            // Pinpoint accuracy by default: land at the exact rendered crosshair/reticle position
+            let impactNormX = state.renderAimX;
+            let impactNormY = state.renderAimY;
+
+            if (state.realisticBallistics) {
+                // Optional gravity drop, subtle breeze drift, and release dispersion
+                const gravityDropNormY = (1 - power) * 0.42;
+                const windDriftNormX = Math.sin(performance.now() * 0.0007) * 0.06;
+                const jitterX = (Math.random() - 0.5) * 0.025 * (1.2 - power * 0.5);
+                const jitterY = (Math.random() - 0.5) * 0.025 * (1.2 - power * 0.5);
+
+                impactNormX += windDriftNormX + jitterX;
+                impactNormY += gravityDropNormY + jitterY;
+            }
+
+            // Launch arrow from bottom-center bow position toward target point
+            state.flyingArrow = {
+                startX: state.centerX + state.renderAimX * 45,
+                startY: state.height + 30,
+                targetNormX: impactNormX,
+                targetNormY: impactNormY,
+                progress: 0,
+                speed: 0.055 + power * 0.035, // Faster flight at full draw
+                power: power
+            };
+        }
+
+        function resolveArrowImpact(arrow) {
+            const distFromCenter = Math.hypot(arrow.targetNormX, arrow.targetNormY);
+            let hitScore = 0;
+            let isBullseyeX = false;
+
+            // Check against standard concentric scoring rings
+            for (let i = RINGS.length - 1; i >= 0; i--) {
+                if (distFromCenter <= RINGS[i].maxR) {
+                    hitScore = RINGS[i].score;
+                    if (RINGS[i].isX) isBullseyeX = true;
+                    break;
+                }
+            }
+
+            // Record stuck arrow on target board (even misses embedded in outer straw backing)
+            if (distFromCenter <= 1.25) {
+                state.stuckArrows.push({
+                    normX: arrow.targetNormX,
+                    normY: arrow.targetNormY,
+                    score: hitScore,
+                    angle: (Math.random() - 0.5) * 0.25 - 0.15
+                });
+            }
+
+            // Update Score & High Score
+            state.score += hitScore;
+            if (state.score > state.highScore) {
+                state.highScore = state.score;
+                localStorage.setItem('gyroArcheryHighScore', String(state.highScore));
+            }
+
+            sound.playImpact(hitScore);
+            spawnHitCallout(hitScore, isBullseyeX, arrow.targetNormX, arrow.targetNormY);
+            updateHUD();
+
+            // Check if round is finished
+            if (state.arrowsLeft <= 0) {
+                state.roundActive = false;
+                drawShootBtn.disabled = true;
+                drawBtnText.textContent = 'Round Complete';
+                setTimeout(showRoundSummary, 1100);
+            }
+        }
+
+        // ==========================================
+        // 8. UI FEEDBACK, CALLOUTS & ROUND FLOW
+        // ==========================================
+        function spawnHitCallout(score, isX, normX, normY) {
+            const el = document.createElement('div');
+            const screenX = state.centerX + normX * state.targetRadius;
+            const screenY = state.centerY + normY * state.targetRadius;
+
+            let label = '';
+            let colorClass = '';
+
+            if (isX) {
+                label = 'X-RING BULLSEYE! +10';
+                colorClass = 'text-yellow-300 bg-slate-950/90 border-yellow-400';
+            } else if (score === 10) {
+                label = 'BULLSEYE! +10';
+                colorClass = 'text-yellow-400 bg-slate-950/90 border-yellow-400';
+            } else if (score === 9) {
+                label = 'GOLD! +9';
+                colorClass = 'text-yellow-300 bg-slate-900/90 border-yellow-500/70';
+            } else if (score >= 7) {
+                label = `RED RING +${score}`;
+                colorClass = 'text-rose-400 bg-slate-900/90 border-rose-500/70';
+            } else if (score >= 5) {
+                label = `BLUE RING +${score}`;
+                colorClass = 'text-sky-400 bg-slate-900/90 border-sky-500/70';
+            } else if (score >= 1) {
+                label = `HIT +${score}`;
+                colorClass = 'text-slate-200 bg-slate-900/90 border-slate-500/70';
+            } else {
+                label = 'MISS +0';
+                colorClass = 'text-slate-400 bg-slate-950/85 border-slate-700';
+            }
+
+            el.className = `score-callout absolute px-3 py-1 rounded-full border text-xs sm:text-sm font-extrabold tracking-wide shadow-xl whitespace-nowrap ${colorClass}`;
+            el.style.left = `${clamp(screenX, 70, state.width - 70)}px`;
+            el.style.top = `${clamp(screenY - 20, 40, state.height - 40)}px`;
+            el.textContent = label;
+
+            calloutLayer.appendChild(el);
+            setTimeout(() => el.remove(), 1550);
+        }
+
+        function showToast(message) {
+            const existing = document.getElementById('toastBanner');
+            if (existing) existing.remove();
+
+            const toast = document.createElement('div');
+            toast.id = 'toastBanner';
+            toast.className = 'fixed top-24 left-1/2 -translate-x-1/2 z-50 bg-slate-800/95 border border-slate-600 text-slate-100 text-xs font-semibold px-4 py-2 rounded-full shadow-xl transition-opacity duration-300';
+            toast.textContent = message;
+            document.body.appendChild(toast);
+
+            setTimeout(() => {
+                toast.style.opacity = '0';
+                setTimeout(() => toast.remove(), 300);
+            }, 2200);
+        }
+
+        function updateHUD() {
+            currentScoreEl.textContent = state.score;
+            highScoreEl.textContent = state.highScore;
+            arrowsLeftText.textContent = state.arrowsLeft;
+
+            // Render visual arrow icons in quiver
+            quiverIcons.innerHTML = '';
+            for (let i = 0; i < MAX_ARROWS; i++) {
+                const active = i < state.arrowsLeft;
+                const dot = document.createElement('div');
+                dot.className = `w-2 h-5 rounded-full transition-all duration-200 ${
+                    active
+                        ? 'bg-gradient-to-t from-amber-500 to-yellow-300 shadow-sm shadow-yellow-400/40 scale-100'
+                        : 'bg-slate-800 border border-slate-700 scale-90 opacity-40'
+                }`;
+                quiverIcons.appendChild(dot);
+            }
+        }
+
+        function showRoundSummary() {
+            finalScoreDisplay.textContent = state.score;
+            finalBestDisplay.textContent = state.highScore;
+
+            if (state.score >= 56) {
+                roundSummaryRank.textContent = 'Olympic Master Archer! Extraordinary precision.';
+            } else if (state.score >= 45) {
+                roundSummaryRank.textContent = 'Sharpshooter! Tight grouping in the gold and red.';
+            } else if (state.score >= 30) {
+                roundSummaryRank.textContent = 'Solid Marksman! Try fine-tuning tilt sensitivity for higher scores.';
+            } else {
+                roundSummaryRank.textContent = 'Good warm-up! Hold full draw until the reticle settles on gold.';
+            }
+
+            roundOverModal.classList.remove('hidden');
+        }
+
+        function resetRound() {
+            state.score = 0;
+            state.arrowsLeft = MAX_ARROWS;
+            state.roundActive = true;
+            state.stuckArrows = [];
+            state.flyingArrow = null;
+            state.isDrawing = false;
+            state.drawPower = 0;
+
+            drawShootBtn.disabled = false;
+            drawShootBtn.classList.remove('drawing');
+            drawBtnText.textContent = 'Hold to Draw & Release to Shoot';
+            roundOverModal.classList.add('hidden');
+
+            updateHUD();
+        }
+
+        // ==========================================
+        // 9. MAIN ANIMATION & RENDERING LOOP
+        // ==========================================
+        function clamp(val, min, max) {
+            return Math.max(min, Math.min(max, val));
+        }
+
+        function updatePhysics(now) {
+            // 1. Update Draw Power when holding button
+            if (state.isDrawing) {
+                const elapsed = (now - state.drawStartTime) / 1000;
+                // Reaches 100% draw in 0.95 seconds
+                state.drawPower = clamp(elapsed / 0.95, 0, 1);
+
+                // Tactile audio ticks at 25%, 50%, 75%, 100% draw
+                const step = Math.floor(state.drawPower * 4);
+                if (step > state.lastTickStep) {
+                    state.lastTickStep = step;
+                    sound.playDrawTick(state.drawPower);
+                }
+            }
+
+            // 2. Compute Target Aim Coordinates from Gyroscope
+            if (state.gyroActive && state.hasInitialReading && !state.isDraggingAim) {
+                // Delta angles from calibrated zero position
+                let deltaGamma = state.rawGamma - state.zeroGamma; // Left (-) / Right (+)
+                let deltaBeta = state.rawBeta - state.zeroBeta;    // Tilt Down (-) / Tilt Up (+)
+
+                // Handle wrap-around protection on gamma/beta
+                if (deltaGamma > 90) deltaGamma -= 180;
+                if (deltaGamma < -90) deltaGamma += 180;
+
+                // Map 22 degrees of tilt at 1.0x sensitivity to full target radius (1.0)
+                const degToNorm = (1 / 22) * state.sensitivity;
+                state.targetNormX = clamp(deltaGamma * degToNorm, -1.65, 1.65);
+                state.targetNormY = clamp(deltaBeta * degToNorm, -1.65, 1.65);
+            }
+
+            // 3. Apply Exponential Smoothing / Stabilizer Damping
+            // Higher smoothing value = smoother, less jittery reticle
+            const lerpFactor = clamp(1 - state.smoothing * 0.88, 0.06, 0.85);
+            state.currentNormX += (state.targetNormX - state.currentNormX) * lerpFactor;
+            state.currentNormY += (state.targetNormY - state.currentNormY) * lerpFactor;
+
+            // 4. Subtle realistic breathing sway (tightens at mid-draw, slight fatigue tremor if held > 3.5s)
+            const t = now * 0.0022;
+            let swayAmp = 0.016;
+            if (state.isDrawing) {
+                const holdSec = (now - state.drawStartTime) / 1000;
+                if (holdSec < 2.8) {
+                    // Steady focus window while drawing
+                    swayAmp = 0.007 * (1.2 - state.drawPower * 0.5);
+                } else {
+                    // Arm fatigue tremor if held too long
+                    swayAmp = Math.min(0.045, 0.007 + (holdSec - 2.8) * 0.012);
+                }
+            }
+            const swayX = Math.sin(t * 1.3) * swayAmp;
+            const swayY = Math.cos(t * 1.9) * swayAmp;
+
+            state.renderAimX = state.currentNormX + swayX;
+            state.renderAimY = state.currentNormY + swayY;
+
+            // 5. Update Flying Arrow Animation
+            if (state.flyingArrow) {
+                state.flyingArrow.progress += state.flyingArrow.speed;
+                if (state.flyingArrow.progress >= 1) {
+                    const finishedArrow = state.flyingArrow;
+                    state.flyingArrow = null;
+                    resolveArrowImpact(finishedArrow);
+                }
+            }
+        }
+
+        function drawTargetBoard() {
+            const cx = state.centerX;
+            const cy = state.centerY;
+            const R = state.targetRadius;
+
+            // Wooden tripod legs behind target
+            ctx.save();
+            ctx.strokeStyle = '#78350f';
+            ctx.lineWidth = Math.max(6, R * 0.045);
+            ctx.lineCap = 'round';
+
+            // Left leg
+            ctx.beginPath();
+            ctx.moveTo(cx - R * 0.35, cy + R * 0.65);
+            ctx.lineTo(cx - R * 0.68, cy + R * 1.38);
+            ctx.stroke();
+
+            // Right leg
+            ctx.beginPath();
+            ctx.moveTo(cx + R * 0.35, cy + R * 0.65);
+            ctx.lineTo(cx + R * 0.68, cy + R * 1.38);
+            ctx.stroke();
+
+            // Straw Target Backing Rim + Drop Shadow
+            ctx.shadowColor = 'rgba(0, 0, 0, 0.55)';
+            ctx.shadowBlur = 28;
+            ctx.shadowOffsetY = 14;
+
+            ctx.beginPath();
+            ctx.arc(cx, cy, R * 1.12, 0, Math.PI * 2);
+            ctx.fillStyle = '#d97706';
+            ctx.fill();
+
+            ctx.shadowColor = 'transparent';
+            ctx.lineWidth = 4;
+            ctx.strokeStyle = '#92400e';
+            ctx.stroke();
+
+            // Concentric Archery Scoring Rings (drawn from outermost 1 to innermost X)
+            for (let i = 0; i < RINGS.length; i++) {
+                const ring = RINGS[i];
+                const radius = R * ring.maxR;
+
+                ctx.beginPath();
+                ctx.arc(cx, cy, radius, 0, Math.PI * 2);
+                ctx.fillStyle = ring.color;
+                ctx.fill();
+
+                ctx.lineWidth = ring.isX ? 1 : 1.5;
+                ctx.strokeStyle = ring.stroke;
+                ctx.stroke();
+
+                // Ring Score Numbers along the horizontal axis (skip 10 and X for clarity)
+                if (ring.score <= 9 && R >= 130) {
+                    const prevMaxR = i < RINGS.length - 1 ? RINGS[i + 1].maxR : 0;
+                    const midR = R * ((ring.maxR + prevMaxR) / 2);
+                    ctx.fillStyle = ring.labelColor;
+                    ctx.font = `700 ${Math.max(9, Math.round(R * 0.052))}px Inter, sans-serif`;
+                    ctx.textAlign = 'center';
+                    ctx.textBaseline = 'middle';
+                    ctx.fillText(String(ring.score), cx - midR, cy);
+                    ctx.fillText(String(ring.score), cx + midR, cy);
+                }
+            }
+
+            // Center '+' spider cross inside X-ring
+            ctx.strokeStyle = '#713f12';
+            ctx.lineWidth = 1.5;
+            const crossLen = R * 0.02;
+            ctx.beginPath();
+            ctx.moveTo(cx - crossLen, cy);
+            ctx.lineTo(cx + crossLen, cy);
+            ctx.moveTo(cx, cy - crossLen);
+            ctx.lineTo(cx, cy + crossLen);
+            ctx.stroke();
+
+            ctx.restore();
+        }
+
+        function drawStuckArrows() {
+            const cx = state.centerX;
+            const cy = state.centerY;
+            const R = state.targetRadius;
+
+            for (const arrow of state.stuckArrows) {
+                const ax = cx + arrow.normX * R;
+                const ay = cy + arrow.normY * R;
+
+                ctx.save();
+                ctx.translate(ax, ay);
+
+                // Impact shadow on target face
+                ctx.beginPath();
+                ctx.ellipse(3, 5, 14, 3, arrow.angle, 0, Math.PI * 2);
+                ctx.fillStyle = 'rgba(0, 0, 0, 0.35)';
+                ctx.fill();
+
+                // Arrow shaft sticking out at slight perspective angle
+                ctx.rotate(arrow.angle);
+                ctx.strokeStyle = '#334155';
+                ctx.lineWidth = 3;
+                ctx.beginPath();
+                ctx.moveTo(0, 0);
+                ctx.lineTo(22, -16);
+                ctx.stroke();
+
+                // Highlight along carbon shaft
+                ctx.strokeStyle = '#94a3b8';
+                ctx.lineWidth = 1;
+                ctx.beginPath();
+                ctx.moveTo(1, -1);
+                ctx.lineTo(21, -17);
+                ctx.stroke();
+
+                // Fletching vanes (bright neon green/orange)
+                ctx.fillStyle = '#10b981';
+                ctx.beginPath();
+                ctx.moveTo(16, -12);
+                ctx.lineTo(24, -22);
+                ctx.lineTo(26, -17);
+                ctx.closePath();
+                ctx.fill();
+
+                ctx.fillStyle = '#f97316';
+                ctx.beginPath();
+                ctx.moveTo(17, -11);
+                ctx.lineTo(27, -15);
+                ctx.lineTo(24, -10);
+                ctx.closePath();
+                ctx.fill();
+
+                // Puncture hole dot
+                ctx.beginPath();
+                ctx.arc(0, 0, 2.5, 0, Math.PI * 2);
+                ctx.fillStyle = '#020617';
+                ctx.fill();
+
+                ctx.restore();
+            }
+        }
+
+        function drawFlyingArrow() {
+            const arrow = state.flyingArrow;
+            if (!arrow) return;
+
+            const t = arrow.progress;
+            // Ease-out flight curve with slight parabolic arc
+            const easeT = 1 - Math.pow(1 - t, 2);
+            const destX = state.centerX + arrow.targetNormX * state.targetRadius;
+            const destY = state.centerY + arrow.targetNormY * state.targetRadius;
+
+            const arcHeight = Math.sin(t * Math.PI) * (55 * (1.2 - arrow.power * 0.4));
+            const curX = arrow.startX + (destX - arrow.startX) * easeT;
+            const curY = arrow.startY + (destY - arrow.startY) * easeT - arcHeight;
+
+            // Perspective depth scaling: large near bow, shrinks as it approaches target
+            const scale = 2.4 - easeT * 1.85;
+
+            ctx.save();
+            ctx.translate(curX, curY);
+            ctx.scale(scale, scale);
+
+            // Arrow body foreshortened in perspective
+            const len = 46 * (1 - easeT * 0.55);
+            ctx.strokeStyle = '#1e293b';
+            ctx.lineWidth = 4;
+            ctx.lineCap = 'round';
+            ctx.beginPath();
+            ctx.moveTo(0, 0);
+            ctx.lineTo(0, len);
+            ctx.stroke();
+
+            // Fletching tail
+            ctx.fillStyle = '#facc15';
+            ctx.beginPath();
+            ctx.moveTo(0, len * 0.7);
+            ctx.lineTo(-8, len);
+            ctx.lineTo(0, len * 0.92);
+            ctx.lineTo(8, len);
+            ctx.closePath();
+            ctx.fill();
+
+            ctx.restore();
+        }
+
+        function drawAimingReticle() {
+            const rx = state.centerX + state.renderAimX * state.targetRadius;
+            const ry = state.centerY + state.renderAimY * state.targetRadius;
+
+            // Reticle tightens as the bow is drawn back
+            const baseRadius = 26;
+            const currentRadius = baseRadius - state.drawPower * 12;
+
+            ctx.save();
+
+            // Outer glow ring for high outdoor contrast against both white and black rings
+            ctx.beginPath();
+            ctx.arc(rx, ry, currentRadius, 0, Math.PI * 2);
+            ctx.strokeStyle = 'rgba(15, 23, 42, 0.85)';
+            ctx.lineWidth = 4.5;
+            ctx.stroke();
+
+            ctx.beginPath();
+            ctx.arc(rx, ry, currentRadius, 0, Math.PI * 2);
+            ctx.strokeStyle = state.isDrawing ? '#facc15' : '#38bdf8';
+            ctx.lineWidth = 2.2;
+            ctx.stroke();
+
+            // Draw Power Radial Arc around reticle when drawing bow
+            if (state.isDrawing && state.drawPower > 0) {
+                ctx.beginPath();
+                ctx.arc(rx, ry, currentRadius + 6, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * state.drawPower);
+                ctx.strokeStyle = state.drawPower > 0.85 ? '#10b981' : '#f59e0b';
+                ctx.lineWidth = 3.5;
+                ctx.lineCap = 'round';
+                ctx.stroke();
+            }
+
+            // Crosshair ticks
+            const tickInner = currentRadius * 0.45;
+            const tickOuter = currentRadius + 7;
+
+            ctx.strokeStyle = 'rgba(15, 23, 42, 0.85)';
+            ctx.lineWidth = 3.5;
+            drawCrosshairLines(rx, ry, tickInner, tickOuter);
+
+            ctx.strokeStyle = state.isDrawing ? '#fef08a' : '#e0f2fe';
+            ctx.lineWidth = 1.5;
+            drawCrosshairLines(rx, ry, tickInner, tickOuter);
+
+            // Center precision aiming pin
+            ctx.beginPath();
+            ctx.arc(rx, ry, 3.2, 0, Math.PI * 2);
+            ctx.fillStyle = state.drawPower > 0.85 ? '#10b981' : '#ef4444';
+            ctx.fill();
+            ctx.lineWidth = 1.2;
+            ctx.strokeStyle = '#ffffff';
+            ctx.stroke();
+
+            // Show subtle drop indicator dot only when Realistic Ballistics is ON and partially drawn
+            if (state.realisticBallistics && state.isDrawing && state.drawPower < 0.92) {
+                const dropPreviewY = ry + ((1 - state.drawPower) * 0.42) * state.targetRadius;
+                ctx.beginPath();
+                ctx.arc(rx, dropPreviewY, 2.5, 0, Math.PI * 2);
+                ctx.fillStyle = 'rgba(250, 204, 21, 0.75)';
+                ctx.fill();
+            }
+
+            ctx.restore();
+        }
+
+        function drawCrosshairLines(x, y, inner, outer) {
+            ctx.beginPath();
+            ctx.moveTo(x - outer, y);
+            ctx.lineTo(x - inner, y);
+            ctx.moveTo(x + inner, y);
+            ctx.lineTo(x + outer, y);
+            ctx.moveTo(x, y - outer);
+            ctx.lineTo(x, y - inner);
+            ctx.moveTo(x, y + inner);
+            ctx.lineTo(x, y + outer);
+            ctx.stroke();
+        }
+
+        function drawFirstPersonBowOverlay() {
+            // Subtle stylized bow limb & string arc at bottom edge reacting to aim & draw power
+            const bowX = state.centerX + state.renderAimX * 35;
+            const bowBaseY = state.height + 18;
+            const pullBack = state.drawPower * 38;
+
+            ctx.save();
+            // Bowstring V-shape
+            ctx.strokeStyle = 'rgba(226, 232, 240, 0.45)';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.moveTo(bowX - 130, bowBaseY - 25);
+            ctx.lineTo(bowX, bowBaseY - 25 + pullBack);
+            ctx.lineTo(bowX + 130, bowBaseY - 25);
+            ctx.stroke();
+
+            // Nocked arrow preview when drawing
+            if (state.isDrawing) {
+                ctx.strokeStyle = '#facc15';
+                ctx.lineWidth = 3.5;
+                ctx.beginPath();
+                ctx.moveTo(bowX, bowBaseY - 25 + pullBack);
+                ctx.lineTo(bowX, bowBaseY - 85 + pullBack * 0.6);
+                ctx.stroke();
+            }
+            ctx.restore();
+        }
+
+        function gameLoop(now) {
+            updatePhysics(now);
+
+            // Clear canvas
+            ctx.clearRect(0, 0, state.width, state.height);
+
+            // Render scene back-to-front
+            drawTargetBoard();
+            drawStuckArrows();
+            drawFlyingArrow();
+            drawFirstPersonBowOverlay();
+            drawAimingReticle();
+
+            requestAnimationFrame(gameLoop);
+        }
+
+        // ==========================================
+        // 10. EVENT LISTENERS & INITIALIZATION
+        // ==========================================
+        function syncSensitivity(val) {
+            const num = parseFloat(val);
+            state.sensitivity = num;
+            const formatted = `${num.toFixed(1)}x`;
+            sensitivitySlider.value = num;
+            quickSensitivitySlider.value = num;
+            sensitivityValue.textContent = formatted;
+            quickSensitivityVal.textContent = formatted;
+        }
+
+        sensitivitySlider.addEventListener('input', (e) => syncSensitivity(e.target.value));
+        quickSensitivitySlider.addEventListener('input', (e) => syncSensitivity(e.target.value));
+
+        smoothingSlider.addEventListener('input', (e) => {
+            const pct = parseInt(e.target.value, 10);
+            state.smoothing = pct / 100;
+            smoothingValue.textContent = `${pct}%`;
+        });
+
+        realisticBallisticsToggle.addEventListener('change', (e) => {
+            state.realisticBallistics = e.target.checked;
+            showToast(state.realisticBallistics ? 'Realistic Ballistics: ON' : 'Pinpoint Reticle Mode: ON');
+        });
+
+        calibrateBtn.addEventListener('click', calibrateZeroTilt);
+        resetBtn.addEventListener('click', resetRound);
+        playAgainBtn.addEventListener('click', resetRound);
+
+        toggleSettingsBtn.addEventListener('click', () => {
+            settingsDrawer.classList.toggle('hidden');
+        });
+        closeSettingsBtn.addEventListener('click', () => {
+            settingsDrawer.classList.add('hidden');
+        });
+
+        soundToggleBtn.addEventListener('click', () => {
+            sound.enabled = !sound.enabled;
+            soundIcon.textContent = sound.enabled ? '🔊' : '🔇';
+            soundLabel.textContent = sound.enabled ? 'Sound: ON' : 'Sound: OFF';
+            if (sound.enabled) sound.init();
+        });
+
+        reEnableGyroBtn.addEventListener('click', () => {
+            requestGyroscopePermission();
+            settingsDrawer.classList.add('hidden');
+        });
+
+        enableGyroStartBtn.addEventListener('click', async () => {
+            startModal.classList.add('hidden');
+            await requestGyroscopePermission();
+        });
+
+        desktopFallbackBtn.addEventListener('click', () => {
+            sound.init();
+            startModal.classList.add('hidden');
+            updateModeIndicator();
+            showToast('Touch / Mouse Drag Aim Active');
+        });
+
+        // Boot application on window load
+        window.onload = function () {
+            resizeCanvas();
+            updateHUD();
+            updateModeIndicator();
+            requestAnimationFrame(gameLoop);
+        };
+    </script>
+</body>
+</html>
